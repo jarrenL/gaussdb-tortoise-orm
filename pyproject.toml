@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tortoise-gaussdb"
+version = "0.2.0"
+description = "GaussDB (507, O compatibility mode) backend for Tortoise-ORM, based on the gaussdb (psycopg3-fork) async driver"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "GaussDB Tortoise Adapter Project" }]
+keywords = ["tortoise-orm", "gaussdb", "async", "orm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Database :: Front-Ends",
+]
+dependencies = [
+    "tortoise-orm==1.1.8",
+    "gaussdb==1.0.4",
+    "gaussdb-pool==1.0.4",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov",
+    "asgi-lifespan",
+    "httpx",
+]
+fastapi = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+dev = [
+    "ruff>=0.6",
+    "build",
+]
+
+[project.scripts]
+gaussdb-tortoise = "tortoise_gaussdb.migrations:main"
+
+[project.urls]
+Repository = "https://github.com/jarrenL/gaussdb-tortoise-orm"
+Issues = "https://github.com/jarrenL/gaussdb-tortoise-orm/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tortoise_gaussdb"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "examples", "docs", "README.md", "LICENSE", "NOTICE", "pyproject.toml", "scripts/verify_install.py", ".env.example"]
+exclude = ["**/__pycache__", "**/*.pyc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "gaussdb_integration: tests requiring a live GaussDB 507 O-mode instance",
+    "gaussdb_centralized: tests run against the centralized 507 instance",
+    "gaussdb_distributed: tests run against the distributed 507 CN",
+    "gaussdb_ha: tests requiring CN failover capability",
+]

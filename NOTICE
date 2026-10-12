@@ -1,0 +1,5 @@
+Tortoise-GaussDB adapter
+Backend interface and client/schema patterns are based on Tortoise ORM 1.1.8,
+https://github.com/tortoise/tortoise-orm, licensed under Apache License 2.0.
+GaussDB-specific modifications and tests are maintained in this project.
+The separately supplied gaussdb driver and libpq retain their own licenses.

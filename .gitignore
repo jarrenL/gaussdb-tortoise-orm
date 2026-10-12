@@ -1,0 +1,22 @@
+.env
+.env.*
+!.env.example
+.venv*/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+*.whl
+*.so
+*.dylib
+*.dll
+*.pem
+*.key
+.DS_Store
+reports/
+# Local diagnostic scripts are not part of the source distribution.
+scripts/*
+!scripts/verify_install.py
