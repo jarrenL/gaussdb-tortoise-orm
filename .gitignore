@@ -20,3 +20,4 @@ reports/
 # Local diagnostic scripts are not part of the source distribution.
 scripts/*
 !scripts/verify_install.py
+!scripts/soak.py

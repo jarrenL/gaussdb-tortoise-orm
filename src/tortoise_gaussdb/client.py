@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import uuid
+from contextlib import asynccontextmanager
 from ssl import SSLContext
 from typing import Any, Callable, TypeVar
 
@@ -98,24 +100,45 @@ class GaussDBSQLQueryBuilder(PostgreSQLQueryBuilder):
         return ""
 
     def get_sql(self, ctx=None):
+        if (
+            self._for_update
+            and self._for_update_nowait
+            and self._for_update_skip_locked
+        ):
+            raise exceptions.ConfigurationError(
+                "nowait and skip_locked are mutually exclusive"
+            )
         if not self._on_conflict_fields:
             return super().get_sql(ctx)
         ctx = ctx or self.QUERY_CLS.SQL_CONTEXT
-        if (self._on_conflict_wheres or self._on_conflict_do_update_wheres or
-                self._selects or self._with or not self._values):
-            raise exceptions.OperationalError("Targeted upsert requires VALUES without conditions/CTEs")
-        if self._returns and not self.__dict__.get("_gaussdb_bulk_template",False):
+        if (
+            self._on_conflict_wheres
+            or self._on_conflict_do_update_wheres
+            or self._selects
+            or self._with
+            or not self._values
+        ):
+            raise exceptions.OperationalError(
+                "Targeted upsert requires VALUES without conditions/CTEs"
+            )
+        if self._returns and not self.__dict__.get("_gaussdb_bulk_template", False):
             raise exceptions.OperationalError("MERGE RETURNING is not supported")
-        projection = self.__dict__.get("_gaussdb_projection",{})
+        projection = self.__dict__.get("_gaussdb_projection", {})
         columns = [field.name for field in self._columns]
-        keys = [projection.get(field.name,field.name) for field in self._on_conflict_fields]
-        if not keys or len(set(keys))!=len(keys) or not set(keys)<=set(columns):
-            raise exceptions.OperationalError("Conflict keys must be distinct inserted columns")
+        keys = [
+            projection.get(field.name, field.name) for field in self._on_conflict_fields
+        ]
+        if not keys or len(set(keys)) != len(keys) or not set(keys) <= set(columns):
+            raise exceptions.OperationalError(
+                "Conflict keys must be distinct inserted columns"
+            )
         updates = []
-        for field,value in self._on_conflict_do_updates:
-            name = projection.get(field.name,field.name)
+        for field, value in self._on_conflict_do_updates:
+            name = projection.get(field.name, field.name)
             if value is not None or name not in columns or name in keys:
-                raise exceptions.OperationalError("Updates must copy inserted non-key columns")
+                raise exceptions.OperationalError(
+                    "Updates must copy inserted non-key columns"
+                )
             updates.append(name)
         if not updates and not self._on_conflict_do_nothing:
             raise exceptions.OperationalError("Incomplete conflict action")
@@ -124,24 +147,45 @@ class GaussDBSQLQueryBuilder(PostgreSQLQueryBuilder):
         if schema is not None and schema._parent is not None:
             raise exceptions.OperationalError("Cross-database MERGE is not supported")
         schema = schema._name if schema is not None else None
-        target = (quote_identifier(schema)+"." if schema else "")+quote_identifier(table)
+        target = (quote_identifier(schema) + "." if schema else "") + quote_identifier(
+            table
+        )
         names = [quote_identifier(name) for name in columns]
         # A zero-row typed projection preserves actual column types, including
         # NULL/Decimal/DATE, without guessing parameter casts from Python data.
-        source = "SELECT "+",".join(names)+" FROM "+target+" WHERE 1=0"
+        source = "SELECT " + ",".join(names) + " FROM " + target + " WHERE 1=0"
         for row in self._values:
-            if len(row)!=len(columns):
+            if len(row) != len(columns):
                 raise exceptions.OperationalError("Insert column/value count mismatch")
-            source += " UNION ALL SELECT "+",".join(value.get_sql(ctx) for value in row)+" FROM dual"
-        sql = "MERGE INTO "+target+" t USING ("+source+") s ON "+" AND ".join(
-            "t."+quote_identifier(key)+"=s."+quote_identifier(key) for key in keys
+            source += (
+                " UNION ALL SELECT "
+                + ",".join(value.get_sql(ctx) for value in row)
+                + " FROM dual"
+            )
+        sql = (
+            "MERGE INTO "
+            + target
+            + " t USING ("
+            + source
+            + ") s ON "
+            + " AND ".join(
+                "t." + quote_identifier(key) + "=s." + quote_identifier(key)
+                for key in keys
+            )
         )
         if updates:
-            sql += " WHEN MATCHED THEN UPDATE SET "+",".join(
-                quote_identifier(name)+"=s."+quote_identifier(name) for name in updates
+            sql += " WHEN MATCHED THEN UPDATE SET " + ",".join(
+                quote_identifier(name) + "=s." + quote_identifier(name)
+                for name in updates
             )
-        sql += " WHEN NOT MATCHED THEN INSERT ("+",".join(names)+") VALUES ("+",".join("s."+name for name in names)+")"
-        return annotated_sql({"schema":schema,"table":table,"keys":keys},sql)
+        sql += (
+            " WHEN NOT MATCHED THEN INSERT ("
+            + ",".join(names)
+            + ") VALUES ("
+            + ",".join("s." + name for name in names)
+            + ")"
+        )
+        return annotated_sql({"schema": schema, "table": table, "keys": keys}, sql)
 
 
 class GaussDBClient(postgres_client.BasePostgresClient):
@@ -154,6 +198,19 @@ class GaussDBClient(postgres_client.BasePostgresClient):
     default_timeout: float = 30
 
     def __init__(self, **kwargs: Any) -> None:
+        isolation = kwargs.pop("isolation_level", "READ COMMITTED")
+        levels = {
+            "READ COMMITTED": gaussdb.IsolationLevel.READ_COMMITTED,
+            "REPEATABLE READ": gaussdb.IsolationLevel.REPEATABLE_READ,
+        }
+        if (
+            not isinstance(isolation, str)
+            or isolation.upper().replace("_", " ") not in levels
+        ):
+            raise exceptions.ConfigurationError(
+                "isolation_level must be READ COMMITTED or REPEATABLE READ (507 downgrades SERIALIZABLE)"
+            )
+        self.isolation_level = levels[isolation.upper().replace("_", " ")]
         # W04: optional preflight toggles/extra config
         self.deployment = kwargs.pop("deployment", None)
         if self.deployment not in (None, "centralized", "distributed"):
@@ -218,6 +275,7 @@ class GaussDBClient(postgres_client.BasePostgresClient):
             # dumper fixes (date -> int64 micros) registered automatically;
             # note: async because the fork's pool awaits configure callbacks
             "configure": self._configure_connection,
+            "check": GaussDBPool.check_connection,
             **extra,
         }
 
@@ -238,6 +296,7 @@ class GaussDBClient(postgres_client.BasePostgresClient):
 
     async def _configure_connection(self, conn):
         await wire_adapters.aregister(conn)
+        await conn.set_isolation_level(self.isolation_level)
         if self.schema:
             from tortoise_gaussdb.schema import quote_identifier
 
@@ -303,9 +362,9 @@ class GaussDBClient(postgres_client.BasePostgresClient):
             meta, query = split_contract(query)
             if meta:
                 async with connection.transaction():
-                    await validate_target(connection,meta,self.schema)
+                    await validate_target(connection, meta, self.schema)
                     async with connection.cursor() as cursor:
-                        await cursor.executemany(query,values)
+                        await cursor.executemany(query, values)
                 return
             async with connection.cursor() as cursor:
                 self.log.debug("Execute batch (%s parameter sets)", len(values))
@@ -322,7 +381,7 @@ class GaussDBClient(postgres_client.BasePostgresClient):
         async with self.acquire_connection() as connection:
             meta, query = split_contract(query)
             if meta:
-                await validate_target(connection,meta,self.schema)
+                await validate_target(connection, meta, self.schema)
             cursor: gaussdb.AsyncCursor | gaussdb.AsyncServerCursor
             async with connection.cursor(row_factory=row_factory) as cursor:
                 self.log.debug("Execute query (%s parameters)", len(values or []))
@@ -348,6 +407,45 @@ class GaussDBClient(postgres_client.BasePostgresClient):
         )
         return rows
 
+    @asynccontextmanager
+    async def stream_query(self, query: str, values=None, *, batch_size: int = 1000):
+        """Yield an async row iterator backed by a transaction-scoped server cursor.
+
+        Always use ``async with`` so early loop exits close the cursor and return
+        the pooled connection. Within an ORM transaction this uses a savepoint.
+        """
+        if (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or batch_size < 1
+        ):
+            raise exceptions.ConfigurationError("batch_size must be a positive integer")
+        async with self.acquire_connection() as connection:
+            async with connection.transaction():
+                async with connection.cursor(
+                    "tortoise_stream_" + uuid.uuid4().hex,
+                    row_factory=gaussdb.rows.dict_row,
+                    withhold=False,
+                ) as cursor:
+                    await cursor.execute(query, values)
+
+                    async def rows():
+                        while batch := await cursor.fetchmany(batch_size):
+                            for row in batch:
+                                yield row
+
+                    iterator = rows()
+                    try:
+                        yield iterator
+                    finally:
+                        await iterator.aclose()
+
+    async def inspect_schema(self, schema: str | None = None):
+        """Read columns, constraints, indexes and layout without changing DDL."""
+        from tortoise_gaussdb.introspection import inspect_schema
+
+        return await inspect_schema(self, schema or self.schema or "public")
+
     # -- lifecycle ----------------------------------------------------------
 
     async def _expire_connections(self) -> None:
@@ -367,9 +465,8 @@ class GaussDBClient(postgres_client.BasePostgresClient):
         try:
             return await func(self, *args, **kwargs)
         except (
-            gaussdb.errors.SyntaxErrorOrAccessRuleViolation,
-            gaussdb.errors.DataException,
-            gaussdb.errors.UndefinedTable,
+            gaussdb.ProgrammingError,
+            gaussdb.DataError,
         ) as exc:
             raise exceptions.OperationalError(exc)
         except gaussdb.errors.IntegrityError as exc:
@@ -404,6 +501,7 @@ class TransactionWrapper(GaussDBClient, base_client.TransactionalDBClient):
         self.distributions = connection.distributions
         self.allow_default_distribution = connection.allow_default_distribution
         self.schema = connection.schema
+        self.isolation_level = connection.isolation_level
 
     def _in_transaction(self) -> base_client.TransactionContext:
         return base_client.NestedTransactionContext(TransactionWrapper(self))

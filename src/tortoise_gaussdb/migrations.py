@@ -27,6 +27,28 @@ from tortoise_gaussdb.schema import (
 
 
 class GaussDBSchemaEditor(DistributionMixin, BasePostgresSchemaEditor):
+    async def _alter_field(self, model, old_field, new_field):
+        from copy import copy
+        from tortoise.exceptions import ConfigurationError
+
+        old_name = old_field.source_field or old_field.model_field_name
+        new_name = new_field.source_field or new_field.model_field_name
+        for name in (old_name, new_name):
+            if not name or '"' in name or "\x00" in name:
+                raise ConfigurationError(
+                    "Embedded quotes/NUL in columns are unsupported"
+                )
+        # The upstream editor changes type/default using the *new* name before
+        # renaming the old column. Rename first when both operations coexist.
+        if old_name != new_name:
+            await self._run_sql(
+                f"ALTER TABLE {self._qualify_table_name(model._meta.db_table, model._meta.schema)} "
+                f"RENAME COLUMN {self.quote(old_name)} TO {self.quote(new_name)};"
+            )
+            old_field = copy(old_field)
+            old_field.source_field = new_name
+        await super()._alter_field(model, old_field, new_field)
+
     async def add_field(self, model, field_name):
         from tortoise.fields.relational import (
             ForeignKeyFieldInstance,
@@ -120,7 +142,9 @@ class GaussDBSchemaEditor(DistributionMixin, BasePostgresSchemaEditor):
         if isinstance(constraint, UniqueConstraint) and constraint.condition:
             fields = self._resolve_fields_to_columns(model, constraint.fields)
             resolved = UniqueConstraint(
-                fields=tuple(fields), name=constraint.name, condition=constraint.condition
+                fields=tuple(fields),
+                name=constraint.name,
+                condition=constraint.condition,
             )
             name = self._constraint_name_for_model(model, resolved)
             await self._run_sql(
@@ -198,6 +222,34 @@ class GaussDBMigrationExecutor(MigrationExecutor):
     def _schema_editor(self, atomic=True, collect_sql=False):
         return GaussDBSchemaEditor(self.connection, atomic, collect_sql)
 
+    def _migration_plan(self, targets, applied, graph):
+        if targets is None:
+            return super()._migration_plan(targets, applied, graph)
+        plan = []
+        for target in targets:
+            if target.name not in {"__first__", "__latest__"}:
+                plan.extend(super()._migration_plan([target], applied, graph))
+                continue
+            # Upstream selects global roots/leaves, so a cross-app dependency
+            # can make an app's __first__/__latest__ silently do nothing.
+            backward = target.name == "__first__"
+            for key, node in sorted(graph.node_map.items()):
+                if key.app_label != target.app_label:
+                    continue
+                neighbors = node.parents if backward else node.children
+                if any(n.key.app_label == target.app_label for n in neighbors):
+                    continue
+                resolved = MigrationTarget(key.app_label, key.name)
+                if backward:
+                    plan.extend(
+                        self._backward_plan(
+                            resolved, applied, graph, include_target=True
+                        )
+                    )
+                else:
+                    plan.extend(self._forward_plan(resolved, applied, graph))
+        return self._dedupe_plan(plan)
+
     async def collect_sql(self, app_label, migration_name, *, backward=False):
         class OfflineHistory:
             async def applied_migrations(self):
@@ -227,6 +279,7 @@ class GaussDBMigrationExecutor(MigrationExecutor):
             return await self.plan(targets)
         if fake:
             raise ValueError("Fake migrations are not supported by this adapter")
+        self._full_plan_cache = None
         self.loader.load_disk()
         for migration in self.loader.disk_migrations.values():
             if not migration.atomic:
