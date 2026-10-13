@@ -1,0 +1,3 @@
+# Pinned public source for the tested driver; libpq is installed separately.
+gaussdb @ git+https://github.com/jarrenL/gaussdb-python.git@6d857f8ad4e1c7276395e7f0471295baab01c52f#subdirectory=gaussdb
+gaussdb-pool @ git+https://github.com/jarrenL/gaussdb-python.git@6d857f8ad4e1c7276395e7f0471295baab01c52f#subdirectory=gaussdb_pool

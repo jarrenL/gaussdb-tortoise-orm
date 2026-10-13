@@ -6,7 +6,7 @@
 
 本项目为 **GaussDB Kernel 507 的 O（Oracle）兼容模式**提供 Tortoise ORM 异步数据库后端，通过配套 `gaussdb` 驱动、连接池和 GaussDB libpq 接入**集中式与分布式**数据库。适合需要在 Python 异步应用或 FastAPI 服务中使用 GaussDB 的开发者。
 
-本项目是**独立适配项目**，Python 包名为 `tortoise-gaussdb`，当前声明版本为 `0.2.0`；源码托管于 GitHub，尚未发布到 PyPI，也未作为华为云或 Tortoise ORM 官方组件发布。适配范围仅限 507 O 模式，不包含其他兼容模式。示例用于集成验证，完整 88 组验收仍在进行。
+本项目是**独立适配项目**，Python 包名为 `tortoise-gaussdb`，当前版本为 `0.3.0`；源码托管于 GitHub，尚未发布到 PyPI，也未作为华为云或 Tortoise ORM 官方组件发布。适配范围仅限 507 O 模式，不包含其他兼容模式。示例用于集成验证，完整 88 组验收仍在进行。
 
 ## 目录
 
@@ -40,34 +40,27 @@ Python / FastAPI / Tortoise Model、QuerySet、事务与迁移文件
 
 通过 Tortoise 的后端模块配置 `engine="tortoise_gaussdb"` 接入，不全局修改上游包。连接预检读取数据库版本与实际兼容模式；本地集中式和分布式 O 模式实例分别返回 `A` 和 `ORA`。
 
-已覆盖的场景包括异步连接和连接池、参数化查询、基础建表、CRUD 与自增主键回填、部分类型往返、逻辑关系、批量操作、事务与保存点、迁移前进和回退。分布式建表支持按表配置 HASH 或 REPLICATION，M2M 中间表也使用显式分布配置。具体测试范围和未完成项目见下文。
+已覆盖的场景包括异步连接和连接池、参数化查询、基础建表、CRUD 与自增主键回填、部分类型往返、逻辑关系、批量操作、事务与保存点、迁移前进和回退。分布式建表支持按表配置 HASH 或 REPLICATION，M2M 中间表也使用显式分布配置。0.3.0 进一步提供 JSON 路径与对象表达式、数组、Duration、日期和窗口函数、服务端游标、schema 内省及隔离级别配置。具体入口见[扩展能力](docs/extended-validation.md)。
 
 ## 前置条件
 
-1. Python **3.10+**；目前实测客户端为 **Linux aarch64 / Python 3.12**。依赖固定为 `tortoise-orm==1.1.8`、`gaussdb==1.0.4` 和 `gaussdb-pool==1.0.4`，以 [pyproject.toml](pyproject.toml) 为准。声明支持的 Python 版本不等于全部已验收。
-2. **配套修复版 gaussdb 驱动**和与操作系统、CPU 架构及 GaussDB 507 匹配的 libpq。驱动 wheel 不随 Git 仓库上传；取得配套文件后放到 `docker/gaussdb-1.0.4-py3-none-any.whl`。它与 PyPI 同版本原包内容不同，不能直接替换。来源与校验值见[驱动说明](docs/DRIVER_PROVENANCE.md)。
+1. Python **3.10+**；目前实测客户端为 **Linux aarch64 与 amd64 仿真容器 / Python 3.12**。依赖固定为 `tortoise-orm==1.1.8`、`gaussdb==1.0.4` 和 `gaussdb-pool==1.0.4`，以 [pyproject.toml](pyproject.toml) 为准。声明支持的 Python 版本不等于全部已验收。
+2. **配套修复版 gaussdb 驱动**和与操作系统、CPU 架构及 GaussDB 507 匹配的 libpq。修复版已固定到公开源码提交，使用 `requirements-driver.txt` 安装或构建。它与 PyPI 同版本原包内容不同，不能直接替换。来源与校验值见[驱动说明](docs/DRIVER_PROVENANCE.md)。
 3. 可访问的 GaussDB 507 O 模式数据库、账号和业务 schema。分布式连接 CN；建表和迁移需要相应 DDL 权限，只读连接验证不需要建表权限。
 4. libpq 由使用者从有授权的 GaussDB 客户端渠道取得并安装，适配包和离线 wheelhouse 均不包含它。Linux 环境按实际位置配置 `GAUSSDB_LIBPQ_PATH` 与动态库搜索路径 `LD_LIBRARY_PATH`。
 
 ## 快速开始
 
-以下命令从**本项目根目录**执行。包尚未发布到 PyPI，先单独取得并核对配套驱动 wheel，按上文路径放置，再安装当前源码：
+以下命令从**本项目根目录**执行。包尚未发布到 PyPI，先从固定公开提交安装配套驱动，再安装当前源码：
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install ./docker/gaussdb-1.0.4-py3-none-any.whl
+python -m pip install -r requirements-driver.txt
 python -m pip install .
 ```
 
-本地交付若附带 `dist/wheelhouse`，可用于离线安装其对应的交付快照；Git 仓库不包含 `dist/`：
-
-```bash
-python -m pip install --no-index --find-links dist/wheelhouse \
-  --require-hashes -r dist/requirements-offline.txt
-```
-
-**源码与归档包边界：**当前 `dist/` 中的 0.2.0 包是阶段三构建产物；后续源码中的关系迁移、模型刷新和定向 upsert 补充不能视为已包含在该 wheel 中。使用这些补充时按上面的源码安装方式操作。离线包不包含可选 FastAPI 和测试工具，libpq 也需单独准备。
+本地 0.3.0 交付包位于 `dist/tortoise_gaussdb-0.3.0-py3-none-any.whl` 与对应源码归档；Git 仓库不上传 `dist/`。也可执行 `python -m build` 自行构建。先准备配套驱动和 libpq，再安装 wheel。历史 0.2.0 离线快照不包含 0.3.0 新能力。
 
 在进程环境中设置以下示例参数；凭据由私有环境配置注入，不要提交到代码仓库。示例不会自动读取项目 `.env` 文件，该文件用于 Docker 测试环境。
 
@@ -185,27 +178,27 @@ docker run --rm --env-file .env -v "$PWD:/work" -e PYTHONPATH=/work/src \
 
 ## 已验证范围
 
-2026-10-12 的本地回归使用 GaussDB Kernel **507.0.0**，客户端为 **Linux aarch64 / Python 3.12**。这里的结果来自已有本地实验环境，不代表公有云或所有客户端平台认证。
+0.3.0 的实测服务端为 GaussDB Kernel **507.0.0**，包括集中式 O 模式（目录值 A）与分布式 O 模式（目录值 ORA，2 DN）。客户端为 Linux aarch64 与 amd64 仿真容器，Python 3.12；另有独立集中式 TLS 实例。
 
-| 验证对象 | 已有证据 | 边界 |
+| 验证对象 | 覆盖内容 | 边界 |
 | --- | --- | --- |
-| 集中式 O 模式（目录值 A） | 连接、基础 CRUD/类型、逻辑关系、事务、迁移、FastAPI 回归 | 完整物理外键、级联及 HA 未验收 |
-| 分布式 O 模式（目录值 ORA，2 DN） | 同一套基础回归，另含显式分布建表与跨 DN 提交/回滚 | 多 CN、节点切换及故障恢复未验收 |
-| 阶段三构建包 | 67 项通过：27 项单元、20 项集中式、20 项分布式；两套隔离 venv 安装验证通过 | 对应现有 dist 快照 |
-| 当前源码全量回归 | 上传前重新执行，**77 项通过，0 失败、0 跳过**；包含 FastAPI、关系/刷新与定向 upsert 补充 | 仅代表现有测试集合，完整并发与平台矩阵仍待验收 |
+| 双部署 ORM 回归 | 类型边界、JSON、数组、窗口、聚合/子查询、逻辑关系、批量原子性、并发事务、锁、迁移、内省、流式游标、FastAPI | 分布式物理 FK 明确拒绝 |
+| TLS 与恢复 | verify-full 正例，错误 CA/主机名/认证/端口负例，空闲连接替换，多地址初始连接回退 | 独立集中式实例；不等于集群 HA 验收 |
+| 并发与稳定性 | 1/10/50 并发 × 100/1000 条批量；30 分钟混合读写 | 本地有界负载，不是生产容量结论 |
+| 交付 | 固定公开驱动源码、0.3.0 wheel/sdist、隔离 venv 安装 | libpq 仍需外部授权安装；未发布 PyPI |
 
-上述测试项与原计划的 **88 组场景**不是同一统计口径，不能按数量相加推断全部验收完成。当前验证结果及复现条件见[测试说明](docs/validation.md)，历史交付结果见[阶段三报告](docs/PHASE3_REPORT_20261012.md)。详细缺口见[覆盖清单](docs/COVERAGE_88.md)；历史报告和清单尚未全部同步后续专项结果。原始本地运行报告不随 Git 仓库上传。
+准确测试计数、运行结果与复现条件见[测试说明](docs/validation.md)。测试项与原计划的 **88 组场景**不是同一统计口径；[覆盖清单](docs/COVERAGE_88.md)保留各组剩余子场景，不按 pytest 数量宣称全量验收。历史结果见[阶段三报告](docs/PHASE3_REPORT_20261012.md)。原始私有运行报告不上传。
 
 ## 兼容边界
 
 - **O 模式语义：**已测字符字段的空字符串 `''` 按 `NULL` 返回，应用校验、过滤和非空约束需要考虑这一差异。日期 wire 适配已覆盖部分边界，不代表所有时区、特殊日期及类型组合均已验收。
 - **分布布局：**分布式缺失策略默认报错，只有显式 `allow_default_distribution=True` 才允许数据库默认策略。当前 HASH 校验要求主键、唯一键包含分布列；REPLICATION 可用于适合复制的小表。不能将集中式模型的独立唯一键直接套用到任意 HASH 布局。
-- **关系约束：**当前适配器拒绝分布式物理外键，逻辑关联需显式 `db_constraint=False`，由应用维护引用完整性及删除行为。集中式物理外键、级联和完整关系迁移组合仍需专项验收。
-- **冲突处理：**`bulk_create(ignore_conflicts=True)` 使用 `ON DUPLICATE KEY UPDATE NOTHING`。当前源码已增加指定 `on_conflict` / `update_fields` 的 MERGE 路径，要求冲突列匹配实际存在的无条件唯一索引；不支持条件/CTE、MERGE RETURNING、更新冲突键等组合。完整并发与原子性矩阵尚未验收，跨多个批次或混合主键形式的整体原子性需显式 `in_transaction()`。
-- **查询与迁移：**JSON 属性查询、`FOR NO KEY UPDATE`、带 LIMIT/ORDER BY 的 UPDATE/DELETE 仍关闭。迁移只支持原子执行，拒绝 fake 和非原子迁移；复杂类型变更、约束、多应用及并发迁移尚未完整验收。
+- **关系约束：**当前适配器拒绝分布式物理外键，逻辑关联需显式 `db_constraint=False`，由应用维护引用完整性及删除行为。集中式物理外键已验证 CASCADE、RESTRICT、SET NULL 及非法引用拒绝；完整关系迁移组合仍需逐项验收。
+- **冲突处理：**`bulk_create(ignore_conflicts=True)` 使用 `ON DUPLICATE KEY UPDATE NOTHING`。当前源码已增加指定 `on_conflict` / `update_fields` 的 MERGE 路径，要求冲突列匹配实际存在的无条件唯一索引；不支持条件/CTE、MERGE RETURNING、更新冲突键等组合。已测多批次失败时显式事务整体回滚；跨多个批次或混合主键形式的整体原子性需显式 `in_transaction()`。MERGE 并发同键及全部约束组合仍需专项。
+- **查询与迁移：**JSON 使用本包 `JSONField`、`JSONExtract/JSONF/JSONObject` 与 `data__filter`；上游 F 的 JSON 路径渲染不做全局修改。`FOR NO KEY UPDATE`、带 LIMIT/ORDER BY 的 UPDATE/DELETE 仍关闭，EXPLAIN 仅 TEXT。迁移只支持原子执行，拒绝 fake 和非原子迁移；任意复杂类型变更、多应用及并发迁移组合尚未完整验收。
 - **模型刷新：**Tortoise 1.1.8 的 `refresh_from_db()` 在自定义 `source_field` 场景存在属性映射问题。当前源码提供可选基类 `from tortoise_gaussdb.models import GaussDBModel`，模型继承它可获得刷新映射及 FK/一对一缓存清理修复；直接继承上游 `Model` 不会自动获得修复。
-- **标识符与 TLS：**模型数据库列名包含双引号/NUL 时明确拒绝。TLS 使用 libpq 的 `sslmode`、`sslrootcert` 等参数（放入连接 `server_settings`），不接受 Python `SSLContext`；证书校验正反例尚未验收，连通不等于服务器身份校验通过。
-- **运行保障：**不自动重放故障写事务。HA/CN/DN 切换、持续压力、完整平台矩阵及干净操作系统上的客户端安装仍待验收；隔离 venv 安装通过不等于完成上述验证。
+- **标识符与 TLS：**模型数据库列名包含双引号/NUL 时明确拒绝。TLS 使用 libpq 的 `sslmode`、`sslrootcert` 等参数（放入连接 `server_settings`），不接受 Python `SSLContext`；已通过 verify-full 和证书/认证正反例；客户端证书双向认证未验收。
+- **运行保障：**支持 READ COMMITTED / REPEATABLE READ；拒绝会被 507 降级的 SERIALIZABLE。连接池检测并替换坏连接，不自动重放故障写事务。HA/CN/DN 切换、完整平台矩阵及干净操作系统上的厂商客户端安装仍待验收；池恢复和隔离 venv 安装不能替代它们。
 
 ## 云服务与费用
 
@@ -221,7 +214,8 @@ CRUD 示例会删除自身插入的演示记录，保留表和 schema。测试�
 
 ## 详细文档与依赖
 
-- [测试说明](docs/validation.md)：上传前完整回归结果、复现条件与验收边界。
+- [扩展能力与用法](docs/extended-validation.md)：JSON、日期/窗口、流式读取、内省、隔离级别、TLS 与稳定性测试。
+- [测试说明](docs/validation.md)：0.3.0 回归结果、复现条件与验收边界。
 - [阶段三交付报告](docs/PHASE3_REPORT_20261012.md)：构建包、隔离安装及当时的 67 项回归记录；其中部分限制已被后续源码补充。
 - [88 组覆盖清单](docs/COVERAGE_88.md)：验收计划与覆盖缺口，PARTIAL 不代表该组全部通过。
 - [驱动来源与交付边界](docs/DRIVER_PROVENANCE.md)：配套驱动的哈希、来源及 libpq 边界。
@@ -241,11 +235,11 @@ Tortoise ORM、gaussdb 驱动、gaussdb-pool 和 GaussDB libpq 分别提供 ORM�
 
 **为什么不能直接执行 tortoise migrate？** 当前固定的上游版本不会自动选中本包迁移 editor/recorder。使用 `python -m tortoise_gaussdb.migrations migrate`。
 
-**为什么源码中的新能力在 wheel 安装后不可用？** 现有 dist 包早于后续源码补充，且声明版本尚未更新。按“快速开始”安装当前源码，不能仅凭 `0.2.0` 版本号判断是否包含补充。
+**为什么安装后没有新增 API？** 核对包版本为 `0.3.0`，并检查进程实际导入路径；旧 `0.2.0` wheel 不包含本轮能力。
 
 ## 贡献与安全
 
-源码仓库为 [jarrenL/gaussdb-tortoise-orm](https://github.com/jarrenL/gaussdb-tortoise-orm)，问题与改进可通过 [Issues](https://github.com/jarrenL/gaussdb-tortoise-orm/issues) 反馈；私有仓库需要访问权限。提交改动时附上适用部署形态、复现步骤、依赖版本及对应测试；涉及 ORM 语义或分布式 SQL 的改动应分别验证集中式和分布式 O 模式。
+源码仓库为 [jarrenL/gaussdb-tortoise-orm](https://github.com/jarrenL/gaussdb-tortoise-orm)，问题与改进可通过 [Issues](https://github.com/jarrenL/gaussdb-tortoise-orm/issues) 反馈。提交改动时附上适用部署形态、复现步骤、依赖版本及对应测试；涉及 ORM 语义或分布式 SQL 的改动应分别验证集中式和分布式 O 模式。
 
 反馈中不要包含密码、私钥、客户数据或完整私有连接信息。厂商客户端二进制与驱动的公开分发需遵循其许可；安全问题通过交付方提供的私有渠道反馈。
 
@@ -255,4 +249,4 @@ Tortoise ORM、gaussdb 驱动、gaussdb-pool 和 GaussDB libpq 分别提供 ORM�
 
 ## 维护者与反馈
 
-维护者：[jarrenL](https://github.com/jarrenL)。包元数据中的维护方为 **GaussDB Tortoise Adapter Project**。源码、反馈和发行信息以本项目 GitHub 仓库为准；配套驱动和 libpq 由交付方另行提供。
+维护者：[jarrenL](https://github.com/jarrenL)。包元数据中的维护方为 **GaussDB Tortoise Adapter Project**。源码、反馈和发行信息以本项目 GitHub 仓库为准；配套驱动按固定公开提交构建，libpq 由使用者通过授权渠道准备。

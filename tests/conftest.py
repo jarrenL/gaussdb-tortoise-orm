@@ -13,7 +13,9 @@ def pytest_addoption(parser):
 
 def pytest_collection_modifyitems(config, items):
     for item in items:
-        if "integration" in str(item.path) and not config.getoption("--live"):
+        if any(
+            name in item.path.parts for name in ("integration", "transport")
+        ) and not config.getoption("--live"):
             item.add_marker(
                 pytest.mark.skip(
                     reason="Use --live and configure dedicated test databases"
